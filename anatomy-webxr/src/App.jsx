@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { XR, createXRStore, XRDomOverlay } from '@react-three/xr'
 import AnatomyScene from './components/AnatomyScene'
@@ -57,14 +57,16 @@ function App() {
   const [isInSession, setIsInSession] = useState(false)
   const [models, setModels] = useState([])
   const [selectedOrgan, setSelectedOrgan] = useState(null)
+  const [isExploded, setIsExploded] = useState(false)
 
   useEffect(() => {
     const unsubscribe = store.subscribe((state) => {
       setIsInSession(!!state.session)
-      // When session ends, clear selection and placed models
+      // When session ends, clear selection, placed models, and exploded view state
       if (!state.session) {
         setSelectedOrgan(null)
         setModels([])
+        setIsExploded(false)
       }
     })
     return unsubscribe
@@ -97,76 +99,117 @@ function App() {
         </div>
       )}
 
-      {/* 3D Canvas with WebXR Context */}
-      <Canvas>
-        <XR store={store}>
-          <AnatomyScene
-            models={models}
-            setModels={setModels}
-            setSelectedOrgan={setSelectedOrgan}
-          />
-          
-          <XRDomOverlay>
-            <div className="ui-container" onClick={preventPropagation} onPointerDown={preventPropagation}>
-              {/* Top Panel */}
-              <div className="ui-element glass-panel header-widget">
-                <h1>WebXR Anatomy AR</h1>
-                <p>Placements: {models.length}</p>
-              </div>
+      {/* Wrap 3D Canvas with React Suspense for elegant loading fallback over the network */}
+      <Suspense fallback={
+        <div className="ui-container" style={{ pointerEvents: 'auto', background: '#070709', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', maxWidth: '400px' }}>
+            <div style={{
+              display: 'inline-block',
+              width: '40px',
+              height: '40px',
+              border: '3px solid rgba(255,255,255,0.1)',
+              borderRadius: '50%',
+              borderTopColor: 'var(--accent-blue)',
+              animation: 'spin 1s ease-in-out infinite',
+              marginBottom: '16px'
+            }}></div>
+            <h2 style={{ fontSize: '20px', marginBottom: '8px', fontFamily: 'var(--font-display)' }}>Loading 3D Anatomy...</h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Retrieving high-fidelity skeletal, muscle, and body models</p>
+          </div>
+          <style>{`
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      }>
+        {/* 3D Canvas with WebXR Context */}
+        <Canvas>
+          <XR store={store}>
+            <AnatomyScene
+              models={models}
+              setModels={setModels}
+              setSelectedOrgan={setSelectedOrgan}
+              isExploded={isExploded}
+              setIsExploded={setIsExploded}
+            />
 
-              {/* Middle instruction banner */}
-              {models.length === 0 && (
-                <div className="instruction-banner">
-                  Tap anywhere to spawn anatomy torso at the targeting reticle
-                </div>
-              )}
-
-              {/* Bottom Educational Panel */}
-              {activeData && (
-                <div className={`ui-element glass-panel info-card ${activeData.activeClass}`}>
-                  <div className="info-card-header">
-                    <span className={`system-badge ${activeData.badgeClass}`}>
-                      {activeData.system}
-                    </span>
-                    <button className="close-btn" onClick={() => setSelectedOrgan(null)}>
-                      ✕
-                    </button>
-                  </div>
-                  <h2>{activeData.title}</h2>
-                  <p className="description">{activeData.description}</p>
-                  
-                  {activeData.funFact && (
-                    <div style={{
-                      marginTop: '12px',
-                      marginBottom: '16px',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: 'rgba(255,255,255,0.03)',
-                      borderLeft: '3px solid var(--accent-blue)',
-                      fontSize: '12px',
-                      fontStyle: 'italic',
-                      color: 'var(--text-secondary)'
-                    }}>
-                      <strong>Fun Fact:</strong> {activeData.funFact}
+            <XRDomOverlay>
+              <div className="ui-container" onClick={preventPropagation} onPointerDown={preventPropagation}>
+                {/* Top Panel */}
+                <div className="ui-element glass-panel header-widget" style={{ minWidth: '320px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h1>WebXR Anatomy AR</h1>
+                      <p style={{ margin: 0 }}>Placements: {models.length}</p>
                     </div>
-                  )}
-
-                  <div className="info-details">
-                    {activeData.stats.map((stat, idx) => (
-                      <div className="detail-item" key={idx}>
-                        <span className="label">{stat.label}</span>
-                        <span className="value">{stat.value}</span>
-                      </div>
-                    ))}
+                    {models.length > 0 && (
+                      <button 
+                        className={`glass-button ${isExploded ? 'primary' : ''}`}
+                        style={{ padding: '8px 12px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', borderRadius: '8px', marginLeft: '12px' }}
+                        onClick={() => setIsExploded(!isExploded)}
+                      >
+                        {isExploded ? "Reset Model" : "Separate Layers"}
+                      </button>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-          </XRDomOverlay>
-        </XR>
-      </Canvas>
+
+                {/* Middle instruction banner */}
+                {models.length === 0 && (
+                  <div className="instruction-banner">
+                    Tap anywhere to spawn anatomy torso at the targeting reticle
+                  </div>
+                )}
+
+                {/* Bottom Educational Panel */}
+                {activeData && (
+                  <div className={`ui-element glass-panel info-card ${activeData.activeClass}`}>
+                    <div className="info-card-header">
+                      <span className={`system-badge ${activeData.badgeClass}`}>
+                        {activeData.system}
+                      </span>
+                      <button className="close-btn" onClick={() => setSelectedOrgan(null)}>
+                        ✕
+                      </button>
+                    </div>
+                    <h2>{activeData.title}</h2>
+                    <p className="description">{activeData.description}</p>
+
+                    {activeData.funFact && (
+                      <div style={{
+                        marginTop: '12px',
+                        marginBottom: '16px',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        background: 'rgba(255,255,255,0.03)',
+                        borderLeft: '3px solid var(--accent-blue)',
+                        fontSize: '12px',
+                        fontStyle: 'italic',
+                        color: 'var(--text-secondary)'
+                      }}>
+                        <strong>Fun Fact:</strong> {activeData.funFact}
+                      </div>
+                    )}
+
+                    <div className="info-details">
+                      {activeData.stats.map((stat, idx) => (
+                        <div className="detail-item" key={idx}>
+                          <span className="label">{stat.label}</span>
+                          <span className="value">{stat.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </XRDomOverlay>
+          </XR>
+        </Canvas>
+      </Suspense>
     </div>
   )
 }
 
 export default App
+

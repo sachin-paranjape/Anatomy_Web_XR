@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import ARReticle from './ARReticle'
 import AnatomyModel from '../models/AnatomyModel'
 
-export default function AnatomyScene({ models, setModels, setSelectedOrgan }) {
+export default function AnatomyScene({ models, setModels, setSelectedOrgan, isExploded, setIsExploded }) {
   const reticleRef = useRef()
   const { session } = useXR()
   const { camera } = useThree()
@@ -92,6 +92,8 @@ export default function AnatomyScene({ models, setModels, setSelectedOrgan }) {
           position={model.position}
           quaternion={model.quaternion}
           setSelectedOrgan={setSelectedOrgan}
+          isExploded={isExploded}
+          setIsExploded={setIsExploded}
         />
       ))}
     </>

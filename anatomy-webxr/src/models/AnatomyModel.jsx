@@ -1,24 +1,50 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { useGLTF } from '@react-three/drei'
+import { motion } from 'framer-motion-3d'
 import * as THREE from 'three'
 
-export default function AnatomyModel({ setSelectedOrgan, ...props }) {
+// Preload GLB models at the module level for optimal network performance
+useGLTF.preload('/models/skeleton.glb')
+useGLTF.preload('/models/muscle.glb')
+useGLTF.preload('/models/body.glb')
+
+export default function AnatomyModel({ setSelectedOrgan, isExploded = false, setIsExploded, ...props }) {
   const [hoveredOrgan, setHoveredOrgan] = useState(null)
-  
+
   const heartRef = useRef()
   const leftLungRef = useRef()
   const rightLungRef = useRef()
   const brainRef = useRef()
   const spineRef = useRef()
-  const bodyGroupRef = useRef() // Structural group ref for rotation and offsets
+  const bodyGroupRef = useRef() // Structural group ref for offsets
 
-  // Drag rotation state trackers
-  const dragPlane = useRef(new THREE.Plane())
-  const intersectPoint = useRef(new THREE.Vector3())
-  const worldPos = useRef(new THREE.Vector3())
-  const isDragging = useRef(false)
-  const initialAngle = useRef(0)
-  const initialRotationY = useRef(0)
+  // Load the GLTF models
+  const { scene: skeletonScene } = useGLTF('/models/skeleton.glb')
+  const { scene: muscleScene } = useGLTF('/models/muscle.glb')
+  const { scene: bodyScene } = useGLTF('/models/body.glb')
+
+  // Clone scenes for independent instance rendering and configure custom transparency/materials
+  const { skeletonCloned, muscleCloned, bodyCloned } = useMemo(() => {
+    const skeleton = skeletonScene.clone()
+    const muscle = muscleScene.clone()
+
+    const body = bodyScene.clone()
+    body.traverse((child) => {
+      if (child.isMesh) {
+        child.material = child.material.clone()
+        child.material.transparent = true
+        child.material.opacity = 0.85
+        child.material.depthWrite = false
+      }
+    })
+
+    return {
+      skeletonCloned: skeleton,
+      muscleCloned: muscle,
+      bodyCloned: body
+    }
+  }, [skeletonScene, muscleScene, bodyScene])
 
   // Run real-time micro-animations for the organs
   useFrame((state) => {
@@ -66,212 +92,166 @@ export default function AnatomyModel({ setSelectedOrgan, ...props }) {
     setHoveredOrgan(null)
   }
 
-  // Pointer event handlers for the rotation ring
-  const handleRingDown = (e) => {
-    e.stopPropagation()
-    e.target.setPointerCapture(e.pointerId)
-    isDragging.current = true
-
-    // Retrieve the world position of the body group center
-    if (bodyGroupRef.current) {
-      bodyGroupRef.current.getWorldPosition(worldPos.current)
-    }
-
-    // Setup virtual horizontal intersection plane at the base height
-    dragPlane.current.setFromNormalAndCoplanarPoint(
-      new THREE.Vector3(0, 1, 0),
-      worldPos.current
-    )
-
-    // Calculate initial angle of interaction relative to the model center
-    initialAngle.current = Math.atan2(
-      e.point.x - worldPos.current.x,
-      e.point.z - worldPos.current.z
-    )
-    initialRotationY.current = bodyGroupRef.current.rotation.y
-  }
-
-  const handleRingMove = (e) => {
-    if (!isDragging.current) return
-    e.stopPropagation()
-
-    // Intersect the controller/pointer ray with our virtual plane
-    e.raycaster.ray.intersectPlane(dragPlane.current, intersectPoint.current)
-
-    // Calculate new angle in the XZ plane relative to the model center
-    const currentAngle = Math.atan2(
-      intersectPoint.current.x - worldPos.current.x,
-      intersectPoint.current.z - worldPos.current.z
-    )
-
-    // Apply rotation update on Y-axis
-    const deltaAngle = currentAngle - initialAngle.current
-    if (bodyGroupRef.current) {
-      bodyGroupRef.current.rotation.y = initialRotationY.current + deltaAngle
-    }
-  }
-
-  const handleRingUp = (e) => {
-    if (isDragging.current) {
-      e.stopPropagation()
-      e.target.releasePointerCapture(e.pointerId)
-      isDragging.current = false
-    }
-  }
-
   return (
-    <group {...props}>
+    /*
+      GLOBAL SCALING: Adjust scale array below if the model needs manual calibration.
+      Default is set to [0.2, 0.2, 0.2] to fit nicely on a mobile screen.
+    */
+    <group {...props} scale={[0.05, 0.05, 0.05]}>
       <group ref={spineRef}>
         {/*
-          Architectural preparation for "Exploded View":
-          This bodyGroup group container acts as the root for our anatomical sub-layers
-          (Skeleton, Muscle, Organs, Skin). During the exploded view mode (isExploded = true),
-          we will programmatically offset the individual children groups (Skeleton, Organs, Skin)
-          radially or along the Z/Y axes using refs to separate them for inspection.
+          bodyGroupRef containing all three models and the interactive organs.
         */}
         <group ref={bodyGroupRef}>
-          {/* Outer Torso Glass Shell */}
-          <mesh position={[0, 0.12, 0]}>
-            <cylinderGeometry args={[0.16, 0.11, 0.44, 32, 1, true]} />
-            <meshPhysicalMaterial
-              color="#e2e8f0"
-              transparent={true}
-              opacity={0.3}
-              roughness={0.1}
-              transmission={0.6}
-              thickness={0.5}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-            />
-          </mesh>
 
-          {/* Outer Head Glass Shell */}
-          <mesh position={[0, 0.42, 0]}>
-            <sphereGeometry args={[0.11, 32, 32]} />
-            <meshPhysicalMaterial
-              color="#e2e8f0"
-              transparent={true}
-              opacity={0.3}
-              roughness={0.15}
-              transmission={0.6}
-              thickness={0.3}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-            />
-          </mesh>
-
-          {/* Neck connector */}
-          <mesh position={[0, 0.32, 0]}>
-            <cylinderGeometry args={[0.045, 0.05, 0.06, 16]} />
-            <meshStandardMaterial color="#334155" roughness={0.5} metalness={0.1} />
-          </mesh>
-
-          {/* Spine skeleton pole (central support rod) */}
-          <mesh position={[0, 0.12, -0.05]}>
-            <cylinderGeometry args={[0.015, 0.015, 0.48, 16]} />
-            <meshStandardMaterial color="#475569" roughness={0.3} metalness={0.8} />
-          </mesh>
-
-          {/* Rib Cage Rings (stylized design lines) */}
-          {[0.0, 0.08, 0.16, 0.24].map((yOffset, i) => (
-            <mesh key={i} position={[0, yOffset, 0]} rotation={[0.05, 0, 0]}>
-              <torusGeometry args={[0.13 - i * 0.005, 0.006, 8, 32]} />
-              <meshStandardMaterial color="#94a3b8" roughness={0.4} metalness={0.5} />
-            </mesh>
-          ))}
-
-          {/* Heart Mesh */}
-          <mesh
-            ref={heartRef}
-            position={[-0.03, 0.12, 0.04]}
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedOrgan('heart')
-            }}
-            onPointerOver={(e) => handlePointerOver(e, 'heart')}
-            onPointerOut={handlePointerOut}
+          {/*
+            SKELETON LAYER
+            Use scale, position, and rotation below for manual calibration.
+            Visible only when isExploded is true.
+            CALIBRATION: Adjust the middle value (Y-axis) in position below to lift the model higher or lower on the floor.
+          */}
+          <motion.group
+            visible={isExploded}
+            position={[0, 0.5, 0]}
+            animate={{ x: isExploded ? -0.3 : 0 }}
+            transition={{ type: 'spring', stiffness: 100, damping: 15 }}
           >
-            <boxGeometry args={[0.05, 0.05, 0.05]} />
-            <meshStandardMaterial
-              color="#ff453a"
-              emissive="#ff453a"
-              emissiveIntensity={hoveredOrgan === 'heart' ? 0.6 : 0.2}
-              roughness={0.2}
+            <primitive
+              object={skeletonCloned}
+              scale={[1.2, 1.2, 1.2]}
+              position={[-8, 0, 0]}
             />
-          </mesh>
+          </motion.group>
 
-          {/* Left Lung Mesh */}
-          <mesh
-            ref={leftLungRef}
-            position={[-0.06, 0.14, 0.01]}
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedOrgan('lungs')
-            }}
-            onPointerOver={(e) => handlePointerOver(e, 'lungs')}
-            onPointerOut={handlePointerOut}
+          {/*
+            MUSCLE LAYER
+            Use scale, position, and rotation below for manual calibration.
+            Visible only when isExploded is true.
+            Interactive organ meshes are nested here to translate along with the muscle.
+            CALIBRATION: Adjust the middle value (Y-axis) in position below to lift the model higher or lower on the floor.
+          */}
+          <motion.group
+            visible={isExploded}
+            position={[0, 0.5, 0]}
+            animate={{ x: isExploded ? 0.3 : 0 }}
+            transition={{ type: 'spring', stiffness: 100, damping: 15 }}
           >
-            <sphereGeometry args={[0.04, 32, 32]} />
-            <meshStandardMaterial
-              color="#ff2d55"
-              emissive="#ff2d55"
-              emissiveIntensity={hoveredOrgan === 'lungs' ? 0.5 : 0.1}
-              roughness={0.4}
+            <primitive
+              object={muscleCloned}
+              scale={[680, 680, 680]}
+              position={[8, 0, 0]}
             />
-          </mesh>
 
-          {/* Right Lung Mesh */}
-          <mesh
-            ref={rightLungRef}
-            position={[0.06, 0.14, 0.01]}
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedOrgan('lungs')
-            }}
-            onPointerOver={(e) => handlePointerOver(e, 'lungs')}
-            onPointerOut={handlePointerOut}
-          >
-            <sphereGeometry args={[0.04, 32, 32]} />
-            <meshStandardMaterial
-              color="#ff2d55"
-              emissive="#ff2d55"
-              emissiveIntensity={hoveredOrgan === 'lungs' ? 0.5 : 0.1}
-              roughness={0.4}
-            />
-          </mesh>
-
-          {/* Brain Mesh */}
-          <group
-            ref={brainRef}
-            position={[0, 0.43, 0]}
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedOrgan('brain')
-            }}
-            onPointerOver={(e) => handlePointerOver(e, 'brain')}
-            onPointerOut={handlePointerOut}
-          >
-            {/* Main brain mass */}
-            <mesh>
-              <sphereGeometry args={[0.075, 16, 16]} />
+            {/* Heart Mesh */}
+            <mesh
+              ref={heartRef}
+              position={[-0.03, 0.12, 0.04]}
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedOrgan('heart')
+              }}
+              onPointerOver={(e) => handlePointerOver(e, 'heart')}
+              onPointerOut={handlePointerOut}
+            >
+              <boxGeometry args={[0.05, 0.05, 0.05]} />
               <meshStandardMaterial
-                color="#bf5af2"
-                emissive="#bf5af2"
-                emissiveIntensity={hoveredOrgan === 'brain' ? 0.5 : 0.1}
-                roughness={0.5}
-                wireframe
+                color="#ff453a"
+                emissive="#ff453a"
+                emissiveIntensity={hoveredOrgan === 'heart' ? 0.6 : 0.2}
+                roughness={0.2}
               />
             </mesh>
-            <mesh scale={[1.05, 0.9, 1.25]}>
-              <sphereGeometry args={[0.07, 32, 32]} />
+
+            {/* Left Lung Mesh */}
+            <mesh
+              ref={leftLungRef}
+              position={[-0.06, 0.14, 0.01]}
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedOrgan('lungs')
+              }}
+              onPointerOver={(e) => handlePointerOver(e, 'lungs')}
+              onPointerOut={handlePointerOut}
+            >
+              <sphereGeometry args={[0.04, 32, 32]} />
               <meshStandardMaterial
-                color="#bf5af2"
-                emissive="#bf5af2"
-                emissiveIntensity={hoveredOrgan === 'brain' ? 0.4 : 0.08}
-                roughness={0.3}
+                color="#ff2d55"
+                emissive="#ff2d55"
+                emissiveIntensity={hoveredOrgan === 'lungs' ? 0.5 : 0.1}
+                roughness={0.4}
               />
             </mesh>
-          </group>
+
+            {/* Right Lung Mesh */}
+            <mesh
+              ref={rightLungRef}
+              position={[0.06, 0.14, 0.01]}
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedOrgan('lungs')
+              }}
+              onPointerOver={(e) => handlePointerOver(e, 'lungs')}
+              onPointerOut={handlePointerOut}
+            >
+              <sphereGeometry args={[0.04, 32, 32]} />
+              <meshStandardMaterial
+                color="#ff2d55"
+                emissive="#ff2d55"
+                emissiveIntensity={hoveredOrgan === 'lungs' ? 0.5 : 0.1}
+                roughness={0.4}
+              />
+            </mesh>
+
+            {/* Brain Mesh */}
+            <group
+              ref={brainRef}
+              position={[0, 0.43, 0]}
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedOrgan('brain')
+              }}
+              onPointerOver={(e) => handlePointerOver(e, 'brain')}
+              onPointerOut={handlePointerOut}
+            >
+              {/* Main brain mass */}
+              <mesh>
+                <sphereGeometry args={[0.075, 16, 16]} />
+                <meshStandardMaterial
+                  color="#bf5af2"
+                  emissive="#bf5af2"
+                  emissiveIntensity={hoveredOrgan === 'brain' ? 0.5 : 0.1}
+                  roughness={0.5}
+                  wireframe
+                />
+              </mesh>
+              <mesh scale={[1.05, 0.9, 1.25]}>
+                <sphereGeometry args={[0.07, 32, 32]} />
+                <meshStandardMaterial
+                  color="#bf5af2"
+                  emissive="#bf5af2"
+                  emissiveIntensity={hoveredOrgan === 'brain' ? 0.4 : 0.08}
+                  roughness={0.3}
+                />
+              </mesh>
+            </group>
+          </motion.group>
+
+          {/*
+            BODY/SKIN LAYER
+            Use scale, position, and rotation below for manual calibration.
+            Visible initially, disappears once isExploded is true.
+            Separation is now managed entirely by the top-level UI button.
+          */}
+          <motion.group
+            visible={!isExploded}
+            transition={{ type: 'spring', stiffness: 100, damping: 15 }}
+          >
+            <primitive
+              object={bodyCloned}
+              scale={[0.1, 0.1, 0.1]}
+              position={[0, 0, 0]}
+            />
+          </motion.group>
 
           {/* Sleek support base (virtual stand) */}
           <mesh position={[0, -0.15, 0]}>
@@ -282,26 +262,11 @@ export default function AnatomyModel({ setSelectedOrgan, ...props }) {
             <cylinderGeometry args={[0.015, 0.015, 0.06, 16]} />
             <meshStandardMaterial color="#475569" roughness={0.3} metalness={0.8} />
           </mesh>
-
-          {/* Styled Rotation Ring at the base of the virtual stand */}
-          <mesh
-            position={[0, -0.15, 0]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            onPointerDown={handleRingDown}
-            onPointerMove={handleRingMove}
-            onPointerUp={handleRingUp}
-            onPointerLeave={handleRingUp}
-          >
-            <torusGeometry args={[0.15, 0.008, 16, 64]} />
-            <meshBasicMaterial
-              color="#0a84ff"
-              transparent
-              opacity={0.6}
-              depthWrite={false}
-            />
-          </mesh>
         </group>
       </group>
     </group>
   )
 }
+
+
+
