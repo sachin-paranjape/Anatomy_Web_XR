@@ -149,7 +149,7 @@ function App() {
                         style={{ padding: '8px 12px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', borderRadius: '8px', marginLeft: '12px' }}
                         onClick={() => setIsExploded(!isExploded)}
                       >
-                        {isExploded ? "Reset Model" : "Separate Layers"}
+                        {isExploded ? "View Exterior" : "View Skeleton"}
                       </button>
                     )}
                   </div>
